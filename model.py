@@ -29,7 +29,7 @@ class GCNLayer(nn.Module):
         else:
             self.dropout = False
 
-        self.norm = None
+        self.norm = 'both'
 
         self.reset_parameters()
 
@@ -43,12 +43,12 @@ class GCNLayer(nn.Module):
         if self.dropout:
             h = self.dropout(h)
 
-        h = torch.mm(h, self.weight)
         g.srcdata['h'] = h
         g.update_all(msg_func, fn.sum(msg='m', out='h'))
         h = g.dstdata['h']
         # bias
 
+        h = torch.mm(h, self.weight)
         if self.norm != 'none':
             degs = g.in_degrees().to(h.device).float().clamp(min=1)
             if self.norm == 'both':
@@ -106,7 +106,7 @@ if __name__ == '__main__':
     train_data = get_data('train.csv')
     data_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate)
 
-    model = GCN(27, 16, 32, 2, 3, F.relu, 0.1)
+    model = GCN(27, 16, 32, 2, 2, F.relu, 0.1)
     loss_func = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     model.train()
@@ -118,7 +118,8 @@ if __name__ == '__main__':
             prediction = model(bg)
 
             loss = torch.sum(F.cross_entropy(prediction, label, reduction='none')
-                             * (torch.ones_like(label, dtype=torch.float) + torch.tensor(label.clone().detach(), dtype=torch.float) * 40))
+                             * (torch.ones_like(label, dtype=torch.float) + torch.tensor(label.clone().detach(), dtype=torch.float) * 10))
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
