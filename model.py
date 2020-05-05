@@ -1,12 +1,12 @@
 import math
 import torch
 import torch.nn as nn
+import dgl
 import dgl.function as fn
-from dgl.nn.pytorch import GraphConv
 
 
 def msg_func(edges):
-    return {'m': edges.data['order'].unsqueeze(1) * edges.src['h']}
+    return {'m': edges.data['weight'].unsqueeze(1) * edges.src['h']}
 
 
 class GCNLayer(nn.Module):
@@ -100,31 +100,58 @@ if __name__ == '__main__':
     import torch.nn.functional as F
     import torch.optim as optim
     from torch.utils.data import DataLoader
-    from gcn_utils import *
+    from gcn_utils import collate
+    from utils import get_data
     from tqdm import tqdm
 
-    train_data = get_data('train.csv')
+    train_data = get_data('train.csv', device='cuda:0')
     data_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate)
 
-    model = GCN(27, 16, 32, 2, 2, F.relu, 0.1)
+    model = GCN(27, 16, 48, 2, 3, F.relu, 0.1)
     loss_func = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     model.train()
+    device = torch.device('cuda:0')
+    model.to(device)
 
     for epoch in range(80):
         epoch_loss = 0
         batch = tqdm(data_loader)
         for bg, label in batch:
-            prediction = model(bg)
-
-            loss = torch.sum(F.cross_entropy(prediction, label, reduction='none')
-                             * (torch.ones_like(label, dtype=torch.float) + torch.tensor(label.clone().detach(), dtype=torch.float) * 10))
-
             optimizer.zero_grad()
+            prediction = model(bg)
+            loss = torch.mean(F.cross_entropy(prediction, label, reduction='none')
+                             * (torch.ones_like(label, dtype=torch.float, device=device) +
+                                torch.tensor(label.clone().detach(), dtype=torch.float, device=device) * 10))
+
             loss.backward()
             optimizer.step()
             epoch_loss += loss.detach().item()
             batch.set_description(f'epoch {epoch} loss {epoch_loss}')
         if epoch > 10:
-            print(F.softmax(prediction.detach()))
-            print(label)
+            print(F.softmax(prediction.detach()).cpu())
+            print(label.cpu())
+
+    # train_data = get_data('gdb_9_clean.tsv', dataset='gdb-9', device='cuda:0')
+    # data_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate)
+    # model = GCN(27, 16, 32, 11, 2, F.relu, 0.1)
+    # loss_func = nn.MSELoss(reduction='none')
+    # optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # model.train()
+    # device = torch.device('cuda:0')
+    # model.to(device)
+    #
+    # for epoch in range(80):
+    #     epoch_loss = 0
+    #     batch = tqdm(data_loader)
+    #     for bg, label in batch:
+    #         prediction = model(bg)
+    #         loss = torch.mean(loss_func(prediction, label))
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
+    #         epoch_loss += loss.detach().item()
+    #         batch.set_description(f'epoch {epoch} loss {epoch_loss}')
+    #     if epoch > 10:
+    #         print(prediction.detach().cpu())
+    #         print(label.cpu())
