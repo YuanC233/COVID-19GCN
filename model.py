@@ -105,6 +105,7 @@ if __name__ == '__main__':
     from tqdm import tqdm
 
     train_data = get_data('train.csv', device='cuda:0')
+    train_data = get_data('train.csv', device='cuda:0')
     data_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate)
 
     model = GCN(27, 16, 48, 2, 3, F.relu, 0.1)
