@@ -132,4 +132,5 @@ dmypy.json
 .idea/
 
 # Pre-train
-.gdb-9/
+/gdb_preprocess.py
+/gdb-9/
