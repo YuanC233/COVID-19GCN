@@ -8,40 +8,50 @@ from rdkit import RDConfig
 from rdkit.Chem import ChemicalFeatures
 from tqdm import tqdm
 from pysmiles import read_smiles
+from collections import Counter
 
 
-def extract_atom_feature(all_smiles, device):
+def extract_atom_feature(all_smiles, device, no_h, max_len=0):
     fdef_name = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
     factory = ChemicalFeatures.BuildFeatureFactory(fdef_name)
 
     unique_feat = {}
-    with open('atom_unique_feature.txt', 'r') as f:
+    # feat_freq = Counter()
+    # feat_freq_all = Counter()
+    with open('freq_atom_unique_features', 'r') as f:
         for line in f:
-            atm_feat = line.strip().split('\t')
-            unique_feat[atm_feat[0]] = int(atm_feat[1])
+            atm_feat = line.strip()
+            unique_feat[atm_feat] = len(unique_feat)
 
     feature_vectors = []
     all_smiles = tqdm(all_smiles)
     for smiles in all_smiles:
         m = Chem.MolFromSmiles(smiles)
-        m = Chem.AddHs(m)
+        if not no_h:
+            m = Chem.AddHs(m)
         num_atom = m.GetNumAtoms()
         feats = factory.GetFeaturesForMol(m)
-        m_vec = torch.zeros([num_atom, len(unique_feat)], device=device)
+        m_vec = torch.zeros([max_len if max_len else num_atom, len(unique_feat)], device=device)
 
         for feat in feats:
             # print(unique_feat[feat.GetType()])
             # print(feat.GetAtomIds()[0])
+            # feat_freq_all[feat.GetType()] += 1
             if feat.GetType() in unique_feat:
+                # feat_freq[feat.GetType()] += 1
                 for atomid in feat.GetAtomIds():
-                    m_vec[atomid, unique_feat[feat.GetType()]] = 1
+                    if atomid < max_len or max_len == 0:
+                        m_vec[atomid, unique_feat[feat.GetType()]] = 1
         feature_vectors.append(m_vec)
         all_smiles.set_description('Extracting Features ...')
-
+    # print(feat_freq)
+    # print(feat_freq_all)
+    # print(sum(feat_freq.values()))
+    # print(sum(feat_freq_all.values()))
     return feature_vectors
 
 
-def read_raw(filename, dataset, device):
+def read_raw(filename, dataset, device, no_h):
     if dataset == 'covid-19':
         assertion_len = 2
         smile_idx = 0
@@ -66,7 +76,8 @@ def read_raw(filename, dataset, device):
                 assert len(l) == assertion_len
 
                 m = Chem.MolFromSmiles(l[smile_idx])
-                m = Chem.AddHs(m)
+                if not no_h:
+                    m = Chem.AddHs(m)
                 smiles = Chem.MolToSmiles(m)
                 all_smiles.append(smiles)
 
@@ -75,12 +86,12 @@ def read_raw(filename, dataset, device):
                 mol = read_smiles(smiles.replace('[H]', '[G]'), explicit_hydrogen=False, reinterpret_aromatic=True)
                 mols.append(mol)
 
-    features = extract_atom_feature(all_smiles, device)
+    features = extract_atom_feature(all_smiles, device, no_h)
 
     return mols, targets, features
 
 
-def get_data(filename, dataset='covid-19', device='cpu'):
+def get_data(filename, dataset='covid-19', device='cpu', no_h=True):
     assert dataset.lower() in ['covid-19', 'gdb-9']
     '''
     filename in the format of 'xxx.csv'
@@ -98,7 +109,7 @@ def get_data(filename, dataset='covid-19', device='cpu'):
     ele2idx['<unk>'] = len(ele2idx)
 
     # read data and get structure and label of all molecules
-    all_molecules, targets, features = read_raw(filename, dataset, device)
+    all_molecules, targets, features = read_raw(filename, dataset, device, no_h=no_h)
     all_mol_dgl = []
     # print(all_molecules[0].edges(data=True))
 
@@ -135,7 +146,7 @@ def get_data(filename, dataset='covid-19', device='cpu'):
     return list(data)
 
 
-def get_data_for_mlp(filename, dataset='covid-19', device='cpu', max_len=100):
+def get_data_for_mlp(filename, dataset='covid-19', device='cpu', max_len=100, no_h=False):
     assert dataset.lower() in ['covid-19', 'gdb-9']
     ele2idx = {'<PAD>': 0}
 
@@ -147,15 +158,15 @@ def get_data_for_mlp(filename, dataset='covid-19', device='cpu', max_len=100):
     # add unknown element into dictionary
     ele2idx['<UNK>'] = len(ele2idx)
 
-    # all_molecules, targets, features = read_raw_for_mlp(filename, dataset, ele2idx, device, max_len)
-    all_molecules, targets, lengths = read_raw_for_mlp(filename, dataset, ele2idx, device, max_len)
+    all_molecules, targets, lengths, features = read_raw_for_mlp(filename, dataset, ele2idx, device, max_len, no_h)
+    # all_molecules, targets, lengths = read_raw_for_mlp(filename, dataset, ele2idx, device, max_len, no_h)
 
-    #data = zip(all_molecules, features, targets)  # put all info related to each mol together
-    data = zip(all_molecules, targets, lengths)  # put all info related to each mol together
+    data = zip(all_molecules, targets, lengths, features)  # put all info related to each mol together
+    # data = zip(all_molecules, targets, lengths)  # put all info related to each mol together
     return list(data)
 
 
-def read_raw_for_mlp(filename, dataset, ele2idx, device, max_len):
+def read_raw_for_mlp(filename, dataset, ele2idx, device, max_len, no_h):
     if dataset == 'covid-19':
         assertion_len = 2
         smile_idx = 0
@@ -200,8 +211,8 @@ def read_raw_for_mlp(filename, dataset, ele2idx, device, max_len):
 
                 mols.append(torch.tensor(mol, dtype=torch.long, device=device))
 
-    # features = extract_atom_feature(all_smiles, device)
-    return mols, targets, lengths #, features
+    features = extract_atom_feature(all_smiles, device, no_h=no_h, max_len=max_len)
+    return mols, targets, lengths, features
 
 
 if __name__ == '__main__':
